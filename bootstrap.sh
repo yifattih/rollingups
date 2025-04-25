@@ -46,13 +46,12 @@ banner "INSTALL GITHUB CLI"
 
 ###################################################################
 banner "INSTALL GCLOUD & GSUTIL"
-sudo apt-get install apt-transport-https ca-certificates gnupg curl
-curl https://packages.cloud.google.com/apt/doc/apt-key.gpg \
-    | sudo gpg --dearmor -o /usr/share/keyrings/cloud.google.gpg -y
-echo "deb [signed-by=/usr/share/keyrings/cloud.google.gpg] https://packages.cloud.google.com/apt cloud-sdk main" \
-    | sudo tee -a /etc/apt/sources.list.d/google-cloud-sdk.list
-sudo apt-get update \
-    && sudo apt-get install google-cloud-cli -y
+(type -p curl >/dev/null || (sudo apt update && sudo apt-get install curl -y)) \
+    && curl -O https://dl.google.com/dl/cloudsdk/channels/rapid/downloads/google-cloud-cli-linux-x86_64.tar.gz \
+    && tar -xf google-cloud-cli-linux-x86_64.tar.gz \
+    && rm -rf google-cloud-cli-linux-x86_64.tar.gz \
+    && curr_dir="$(pwd)" \
+    && export PATH=${curr_dir}/google-cloud-sdk/bin:${PATH} 
 
 ###################################################################
 banner "GITHUB CLI AUTHENTICATION"
