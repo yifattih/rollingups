@@ -49,14 +49,28 @@ banner "INSTALL GCLOUD & GSUTIL"
     && curl -O https://dl.google.com/dl/cloudsdk/channels/rapid/downloads/google-cloud-cli-linux-x86_64.tar.gz \
     && tar -xf google-cloud-cli-linux-x86_64.tar.gz \
     && rm -rf google-cloud-cli-linux-x86_64.tar.gz \
-    && source "$(pwd)"/google-cloud-sdk/path.zsh.inc
+    && source "$(pwd)"/google-cloud-sdk/path.bash.inc \
+    && echo "# GOOGLE CLOUD CLI" >> ~/.zshrc \
+    && echo "alias gcloud=$(pwd)/google-cloud-sdk/bin/gcloud" >> ~/.zshrc  \
+    && echo "alias gsutil=$(pwd)/google-cloud-sdk/bin/gsutil"  >> ~/.zshrc \
+    && echo "# GOOGLE CLOUD CLI AUTOCOMPLETION" >> ~/.zshrc \
+    && cat "$(pwd)/google-cloud-sdk/completion.zsh.inc" >> ~/.zshrc
+
 
 ###################################################################
-# banner "GITHUB CLI AUTHENTICATION"
-# stty sane
-# gh auth login --git-protocol https --web <<< "y"
+banner "GITHUB CLI AUTHENTICATION"
+stty sane
+gh auth login --git-protocol https --web <<< "y"
 
 ###################################################################
 banner "GCLOUD AUTHENTICATION"
 stty sane
 gcloud auth login --launch-browser
+
+banner "ALL DONE !"
+for i in $(seq 5 -1 1); do
+    echo -ne "CLOSING TERMINAL IN: ${i}\r"
+    sleep 1
+done
+
+kill -9 ${PPID}
