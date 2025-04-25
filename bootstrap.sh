@@ -23,7 +23,6 @@ banner::format_string () {
 }
 ###################################################################
 ###################################################################
-
 banner "UPDATE AND UPGRADE SYSTEM"
 sudo apt-get update
 sudo apt-get upgrade -y
@@ -50,14 +49,12 @@ banner "INSTALL GCLOUD & GSUTIL"
     && curl -O https://dl.google.com/dl/cloudsdk/channels/rapid/downloads/google-cloud-cli-linux-x86_64.tar.gz \
     && tar -xf google-cloud-cli-linux-x86_64.tar.gz \
     && rm -rf google-cloud-cli-linux-x86_64.tar.gz \
-    && echo "alias gcloud=$(pwd)/google-cloud-sdk/bin/gcloud" >> ~/.zshrc \
-    && echo "alias gsutil=$(pwd)/google-cloud-sdk/bin/gsutil" >> ~/.zshrc \
-    && source ~/.zshrc
+    && source "$(pwd)"/google-cloud-sdk/path.zsh.inc
 
 ###################################################################
-banner "GITHUB CLI AUTHENTICATION"
-stty sane
-gh auth login --git-protocol https --web <<< "y"
+# banner "GITHUB CLI AUTHENTICATION"
+# stty sane
+# gh auth login --git-protocol https --web <<< "y"
 
 ###################################################################
 banner "GCLOUD AUTHENTICATION"
