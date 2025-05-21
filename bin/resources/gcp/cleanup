@@ -1,0 +1,166 @@
+#!/bin/bash
+# -----
+# Script Name: cleanup
+# Description: 
+# Usage: 
+# Author: yifattih
+# Date: 04/29/2025
+# Other: ChatGPT Assisted
+# -----
+
+set -euo pipefail
+
+# shellcheck disable=SC1091
+source "${ROLLINGUPS_ROOT_DIR}/bin/logging"
+config="${ROLLINGUPS_ROOT_DIR}/resources.yml"
+
+check_file_exists() {
+    if [[ ! -f "${1}" ]]; then
+        log "ERROR" "Missing required file: ${1}"
+        exit 1
+    fi
+}
+
+project_exists() {
+    gcloud projects describe "${1}" &>/dev/null
+}
+
+sa_exists() {
+    gcloud iam service-accounts list --project="${1}" --format="value(email)" \
+        | grep -q "^${2}$"
+}
+
+delete_service_account_key() {
+    local sa_key_file="${1}"
+
+    log "INFO" "Deleting service account key at: ${sa_key_file}..."
+
+    if [[ -f "${sa_key_file}" ]]; then
+        rm -f "${sa_key_file}"
+        log "SUCCESS" "Service account key at ${sa_key_file} deleted!"
+    else
+        log "WARN" "Service account key file does not exist, skipping deletion."
+    fi
+}
+
+remove_service_account_bindings() {
+    local project_id="${1}"
+    local sa_email="${2}"
+
+    log "INFO" "Removing IAM policy bindings for service account '${sa_email}'..."
+
+    local iam_policy tmp_policy_file
+    tmp_policy_file=$(mktemp)
+
+    iam_policy=$(gcloud projects get-iam-policy "${project_id}" \
+        --format=json)
+
+    echo "${iam_policy}" | jq \
+        --arg sa "serviceAccount:${sa_email}" '
+        .bindings |= map(
+            .members |= map(select(. != $sa))
+        ) | .bindings |= map(select(.members | length > 0))
+        ' > "${tmp_policy_file}"
+
+    gcloud projects set-iam-policy "${project_id}" "${tmp_policy_file}" --quiet &> /dev/null
+
+    rm -f "${tmp_policy_file}"
+    log "SUCCESS" "IAM policy bindings for '${sa_email}' removed!"
+}
+
+delete_service_account() {
+    local project_id="${1}"
+    local sa_email="${2}"
+
+    log "INFO" "Deleting service account '${sa_email}'..."
+
+    if sa_exists "${project_id}" "${sa_email}"; then   
+        gcloud iam service-accounts delete "${sa_email}" --project="${project_id}" --quiet
+         log "SUCCESS" "Service account '${sa_email}' deleted!"
+    else
+        log "WARN" "Service account '${sa_email}' does not exist, skipping deletion."
+    fi
+}
+
+delete_apis() {
+    local project_id="${1}"
+    shift
+    local apis=("${@}")
+
+    log "INFO" "Disabling APIs..."
+
+    for api in "${apis[@]}"; do
+        if gcloud services list --enabled --project="${project_id}" --format="value(config.name)" | grep -q "^${api}$"; then
+            log "INFO" "Disabling API: ${api}..."
+            if [[ "${api}" == "storage.googleapis.com" ]]; then
+                # Disable the dependent service first
+                gcloud services disable "cloudapis.googleapis.com" --project="${project_id}" --quiet
+            fi
+            # Now disable the target API
+            gcloud services disable "${api}" --project="${project_id}" --quiet
+        else
+            log "WARN" "API '${api}' is not enabled, skipping disable."
+        fi
+    done
+
+    log "SUCCESS" "APIs disabled!"
+}
+
+delete_storage_buckets() {
+    local project_id="${1}"
+    local bucket_list="${2}"
+
+    log "INFO" "Deleting Storage Buckets..."
+
+    for bucket_name in $(yq -r ".[]" <<< "${bucket_list}"); do
+        if gsutil list | grep "${bucket_name}" &> /dev/null; then
+            gsutil rm -r "gs://${bucket_name}/"
+            log "SUCCESS" "Storage Bucket '${bucket_name}' deleted!"
+        else
+            log "WARN" "Storage Bucket '${bucket_name}' does not exists, skipping deletion."
+        fi
+    done
+
+    log "SUCCESS" "Storage Buckets deleted!"
+}
+
+delete_project() {
+    local project_id="${1}"
+
+    log "INFO" "Deleting project '${project_id}'..."
+
+    if project_exists "${project_id}"; then
+        gcloud projects delete "${project_id}" --quiet &> /dev/null
+        log "SUCCESS" "Project '${project_id}' deleted!"
+    else
+        log "WARN" "Project '${project_id}' does not exist, skipping deletion."
+    fi
+}
+
+main() {
+    check_file_exists "${config}"
+
+    local project_id
+    local sa_email
+    local sa_key_file
+    local required_apis=()
+
+    project_id=$(yq -r ".gcp.project-id" "${config}")
+    sa_email=$(yq -r ".gcp.service-account-name" "${config}")@${project_id}.iam.gserviceaccount.com
+    sa_key_file="${ROLLINGUPS_ROOT_DIR}/$(yq -r ".gcp.service-account-key-file" "${config}")"
+    mapfile -t required_apis < <(yq -r ".gcp.required-apis[]" "${config}")
+    bucket_list=$(yq -r ".gcp.storage-buckets" "${config}")
+
+    log "INFO" "Starting GCP project cleanup for '${project_id}'..."
+
+    delete_service_account_key "${sa_key_file}"
+    remove_service_account_bindings "${project_id}" "${sa_email}"
+    delete_service_account "${project_id}" "${sa_email}"
+    delete_apis "${project_id}" "${required_apis[@]}"
+    delete_storage_buckets "${project_id}" "${bucket_list}"
+    delete_project "${project_id}"
+
+    log "SUCCESS" "GCP project cleanup complete!"
+}
+
+main

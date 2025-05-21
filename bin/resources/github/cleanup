@@ -1,0 +1,75 @@
+#!/bin/bash
+# -----
+# Script Name: cleanup
+# Description: 
+# Usage: 
+# Author: yifattih
+# Date: 04/26/2025
+# Other: ChatGPT Assisted
+# -----
+
+set -euo pipefail
+
+# shellcheck disable=SC1091
+source "${ROLLINGUPS_ROOT_DIR}/bin/logging"
+config="${ROLLINGUPS_ROOT_DIR}/resources.yml"
+
+check_directory() {
+    local dir="$1"
+    if [[ ! -d "${dir}" ]]; then
+        log "ERROR" "Directory does not exist: ${dir}"
+        return 1
+    fi
+    return 0
+}
+
+remove_git_remote_origin() {
+    local repo_dir="$1"
+    (
+        cd "$repo_dir" || {
+            log "WARN" "Could not cd into ${repo_dir}"
+            return 1
+        }
+
+        if git remote get-url origin &> /dev/null; then
+            git remote remove origin &> /dev/null
+            log "SUCCESS" "Removed 'origin' remote in ${repo_dir}"
+        else
+            log "WARN" "'origin' remote not found in ${repo_dir}"
+        fi
+    )
+}
+
+delete_github_repo() {
+    local name="$1"
+    if gh repo view "${name}" &> /dev/null; then
+        gh repo delete "${name}" --yes &> /dev/null
+        log "SUCCESS" "Deleted GitHub repo: ${name}"
+    else
+        log "WARN" "GitHub repo not found: ${name}"
+    fi
+}
+
+main() {
+    local repo_objs
+
+    repo_objs=$(yq -r '.github.repositories | keys | join(" ")' "${config}")
+
+    log "INFO" "Starting GitHub repositories cleanup $(basename "${ROLLINGUPS_ROOT_DIR}")..."
+
+    for obj in ${repo_objs}; do
+        local name
+        name=$(yq -r ".github.repositories.${obj}.name" "${config}")
+        local dir_path="${ROLLINGUPS_ROOT_DIR}/${name}"
+
+        log "INFO" "Processing: ${name}"
+
+        check_directory "${dir_path}" || continue
+        remove_git_remote_origin "${dir_path}"
+        delete_github_repo "${name}"
+    done
+
+    log "SUCCESS" "GitHub repositories cleanup complete!"
+}
+
+main

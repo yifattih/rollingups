@@ -1,0 +1,69 @@
+#!/bin/bash
+# -----
+# Script Name: rollingups
+# Description: 
+# Usage: rollingups <bootstrap | setup | create-resources | cleanup-resources>
+# Author: yifattih
+# Date: 04/28/2025
+# Other: ChatGPT assisted
+# -----
+
+set -euo pipefail
+
+script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &> /dev/null && pwd)
+# shellcheck disable=SC1091
+source "${ROLLINGUPS_ROOT_DIR}/bin/logging"
+
+usage() {
+    echo -e "${YELLOW}Usage:${NC} $(basename "$0") <command>"
+    echo
+    echo -e "${YELLOW}Available commands:${NC}"
+    echo -e "  ${GREEN}setup${NC}              Set up the environment"
+    echo -e "  ${GREEN}create-resources${NC}   Create necessary resources"
+    echo -e "  ${GREEN}cleanup-resources${NC}  Clean up created resources"
+    echo -e "  ${GREEN}bootstrap${NC}          Set up environment and create resources"
+    echo
+    echo -e "${YELLOW}Example:${NC}"
+    echo -e "  $(basename "$0") setup"
+    exit 1
+}
+
+if [[ $# -lt 1 ]]; then
+    clear
+    log "ERROR" "No option provided."
+    usage
+fi
+
+case "${1}" in
+    setup)
+        clear
+        log "INFO" "Setting up environment..."
+        bash "${script_dir}/setup/setup"
+        read -r -p "Press Enter to close the terminal..."
+        kill -9 ${PPID}
+        ;;
+    create-resources)
+        clear
+        log "INFO" "Creating resources..."
+        bash "${script_dir}/resources/gcp/create"
+        bash "${script_dir}/resources/github/create"
+        ;;
+    cleanup-resources)
+        clear
+        log "INFO" "Cleaning up resources..."
+        bash "${script_dir}/resources/github/cleanup"
+        bash "${script_dir}/resources/gcp/cleanup"
+        ;;
+    bootstrap)
+        clear
+        log "INFO" "Bootstrapping environment..."
+        bash "${script_dir}/setup/setup"
+        bash "${script_dir}/resources/github/create"
+        bash "${script_dir}/resources/gcp/create"
+        ;;
+    *)
+        clear
+        log "ERROR" "Invalid option ${1}"
+        usage
+        ;;
+esac

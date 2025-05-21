@@ -1,0 +1,61 @@
+#!/bin/bash
+# -----
+# Script Name: install-gh
+# Description: 
+# Usage: 
+# Author: yifattih
+# Date: 04/28/2025
+# Other: Main logic from https://github.com/cli/cli/blob/trunk/docs/install_linux.md
+# -----
+
+set -euo pipefail
+
+# shellcheck disable=SC1091
+source "${ROLLINGUPS_ROOT_DIR}/bin/logging"
+
+check_dependencies() {
+    if ! type -p wget > /dev/null; then
+        sudo apt-get install wget -y
+    fi;
+}
+
+setup_keyring() {
+    sudo mkdir -p -m 755 /etc/apt/keyrings
+    out=$(mktemp)
+     wget -nv -O"${out}" https://cli.github.com/packages/githubcli-archive-keyring.gpg
+     cat "${out}" | sudo tee /etc/apt/keyrings/githubcli-archive-keyring.gpg > /dev/null 
+     sudo chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg
+}
+
+download_github_cli() {
+    echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
+        | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null
+}
+
+install_github_cli() {
+    sudo apt update
+    sudo apt install gh -y
+}
+
+main() {
+     log "INFO" "Starting GitHub CLI install"
+    if ! command -v gh &> /dev/null; then
+        log "INFO" "Checking dependencies"
+        check_dependencies
+        log "SUCCESS" "All required dependencies intalled!"
+
+        log "INFO" "Setting up keyring"
+        setup_keyring
+        log "SUCCESS" "Keyring set!"
+
+        log "INFO" "Downloading GitHub CLI"
+        download_github_cli
+        log "SUCCESS" "Download complete!"
+
+        log "INFO" "Installing GitHub CLI"
+        install_github_cli
+    fi
+     log "SUCCESS" "GitHub CLI installation complete!"
+}
+
+main

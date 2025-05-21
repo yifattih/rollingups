@@ -1,0 +1,25 @@
+#!/bin/bash
+# -----
+# Script Name: rollingups-autocompletion
+# Description: 
+# Usage: 
+# Author: yifattih
+# Date: 04/28/2025
+# Other: ChatGPT assisted
+# -----
+_my_completion() {
+    local current previous options
+    COMPREPLY=()
+    current="${COMP_WORDS[COMP_CWORD]}"
+    previous="${COMP_WORDS[COMP_CWORD-1]}"
+
+    case "$previous" in
+        "rollingups")
+        options=" bootstrap setup create-resources cleanup-resources"
+        for word in ${options}; do
+            [[ "${word}" == "${current}"* ]] && COMPREPLY+=("${word}")
+        done
+        ;;
+    esac
+}
+complete -F _my_completion rollingups

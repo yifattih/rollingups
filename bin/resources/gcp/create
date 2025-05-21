@@ -1,0 +1,434 @@
+#!/bin/bash
+# -----
+# Script Name: create
+# Description: 
+# Usage: 
+# Author: yifattih
+# Date: 04/29/2025
+# Other: ChatGPT Assisted
+# -----
+
+# set -euo pipefail
+
+# shellcheck disable=SC1091
+source "${ROLLINGUPS_ROOT_DIR}/bin/logging"
+config="${ROLLINGUPS_ROOT_DIR}/resources.yml"
+
+check_file_exists() {
+    if [[ ! -f "${1}" ]]; then
+        log "ERROR" "Missing required file: ${1}"
+        exit 1
+    fi
+}
+
+project_exists() {
+    gcloud projects describe "${1}" &>/dev/null
+}
+
+is_billing_linked() {
+    gcloud beta billing projects describe "${1}" \
+        --format="value(billingEnabled)" 2>/dev/null | grep -q "True"
+}
+
+sa_exists() {
+    gcloud iam service-accounts list --project="${1}" --format="value(email)" \
+        | grep -q "^${2}$"
+}
+
+api_enabled() {
+    gcloud services list --enabled --project="${1}" --format="value(config.name)" \
+        | grep -q "^${2}$"
+}
+
+countdown() {
+    for ((i="${1}"; i>0; i--)); do
+        echo -ne "\r[INFO] Retry in ${i}s..."  # overwrite the entire line
+        sleep 1
+    done
+    echo -ne "\r\033[K"  # clear the line after countdown finishes
+}
+
+create_project() {
+    local project_id="${1}"
+    local project_name="${2}"
+    local billing_account="${3}"
+    local lifecycle
+
+    if project_exists "${project_id}"; then
+        lifecycle=$(gcloud projects describe "${project_id}" --format="value(lifecycleState)")
+        if [[ "${lifecycle}" == "ACTIVE" ]]; then
+            log "INFO" "Project '${project_id}' already exists and is active."
+        elif [[ "${lifecycle}" == "DELETE_REQUESTED" ]]; then
+            log "INFO" "Project '${project_id}' is in the 'DELETE_REQUESTED' state. Attempting to undelete..."
+            if gcloud projects undelete "${project_id}"; then
+                log "SUCCESS" "Project '${project_id}' undeleted successfully."
+            else
+                log "ERROR" "Failed to undelete project '${project_id}'."
+                exit 1
+            fi
+        else
+            log "ERROR" "Project '${project_id}' exists but is in an unknown state: ${lifecycle}"
+            exit 1
+        fi
+    else
+        log "INFO" "Creating GCP project '${project_id}'..."
+        if gcloud projects create "${project_id}" --name="${project_name}" --set-as-default; then
+            log "SUCCESS" "Project '${project_id}' created successfully."
+        else
+            log "ERROR" "Failed to create project '${project_id}'."
+            exit 1
+        fi
+    fi
+}
+
+wait_for_project_propagation() {
+    local project_id="${1}"
+    local delay="${2:-60}"
+
+    log "INFO" "Waiting for project '${project_id}' activation to propagate across GCP..."
+    for ((i="${delay}"; i>0; i--)); do
+        echo -ne "\r[${YELLOW}INFO${NC}] Waiting ${i}s..."  # overwrite the entire line
+        sleep 1
+    done
+    echo -ne "\r\033[K"  # clear the line after countdown finishes
+}
+
+wait_for_project_ready() {
+    local project_id="${1}"
+    local max_attempts="${3:-5}"
+    local delay="${4:-15}"
+    local attempt=1
+
+    log "INFO" "Waiting for project '${project_id}' to become ACTIVE..."
+
+    while (( attempt <= max_attempts )); do
+        lifecycle=$(gcloud projects describe "${project_id}" --format="value(lifecycleState)" 2>/dev/null || echo "ERROR")
+        if [[ "${lifecycle}" == "ACTIVE" ]]; then
+            log "SUCCESS" "Project '${project_id}' is ACTIVE."
+            return 0
+        else
+            echo -ne "[INFO] Waiting for project readiness: ${lifecycle}"
+            log "WARN" "Attempt ${attempt}: Project '${project_id}' not yet ready. Retrying in ${delay}s..."
+            if (( attempt < max_attempts )); then
+                echo -ne "[${YELLOW}INFO${NC}] Retry attempt $((attempt + 1)) in "
+                countdown "${delay}"
+                echo ""
+            fi
+        fi
+        ((attempt+=1))
+    done
+
+    echo ""
+    log "ERROR" "Project '${project_id}' is not ACTIVE after waiting."
+    return 1
+}
+
+wait_for_service_usage_visibility() {
+    local project_id="${1}"
+    local max_attempts="${3:-5}"
+    local delay="${4:-15}"
+    local attempt=1
+
+    log "INFO" "Waiting for project '${project_id}' to become visible to serviceusage.googleapis.com..."
+
+    while (( attempt <= max_attempts )); do
+        if gcloud services list --project="${project_id}" --format="value(config.name)" &>/dev/null; then
+            log "INFO" "Project '${project_id}' is visible to serviceusage.googleapis.com."
+            return 0
+        else
+            log "WARN" "Attempt ${attempt}: Project '${project_id}' not yet visible. Retrying in ${delay}s..."
+            if (( attempt < max_attempts )); then
+                echo -ne "[${YELLOW}INFO${NC}] Retry attempt $((attempt + 1)) in "
+                countdown "${delay}"
+                echo ""
+            fi
+        fi
+        ((attempt+=1))
+    done
+
+    log "ERROR" "Project '${project_id}' not visible to serviceusage.googleapis.com after ${max_attempts} attempts."
+    return 1
+}
+
+try_link_billing_account() {
+    local project_id="${1}"
+    local billing_account="${2}"
+    local max_attempts="${3:-5}"
+    local delay="${4:-15}"
+    local attempt=1
+    
+    while (( attempt <= max_attempts )); do
+        if output=$(gcloud billing projects link "${project_id}" --billing-account="${billing_account}" 2>&1); then
+            log "SUCCESS" "Billing account successfully linked to project '${project_id}'."
+            return 0
+        else
+            log "WARN" "Attempt ${attempt}: Failed to link billing account."
+            if (( attempt < max_attempts )); then
+                echo -ne "[${YELLOW}INFO${NC}] Retry attempt $((attempt + 1)) in "
+                countdown "${delay}"
+                echo ""
+            fi
+        fi
+        ((attempt+=1))
+    done
+
+    log "ERROR" "All ${max_attempts} attempts failed to link billing account: ${output}"
+    return 1
+}
+
+link_billing_account() {
+    local project_id="${1}"
+    local billing_account="${2}"
+
+    log "INFO" "Linking billing account for project '${project_id}'..."
+
+    wait_for_project_ready "${project_id}" || return 1
+    try_link_billing_account "${project_id}" "${billing_account}" || return 1
+    return 0
+}
+
+enable_apis() {
+    local project_id="${1}"
+    shift
+    local apis=("${@}")
+
+    if is_billing_linked "${project_id}"; then
+        log "INFO" "Enabling required APIs..."
+        for api in "${apis[@]}"; do
+            if api_enabled "${project_id}" "${api}"; then
+                log "INFO" "API already enabled: ${api}"
+            else
+                gcloud services enable "${api}" --project="${project_id}"
+                log "SUCCESS" "Enabled API: ${api}"
+            fi
+        done
+    else
+        log "ERROR" "Billing not enabled for project '${project_id}'. Cannot proceed with API enabling."
+        exit 1
+    fi
+}
+
+create_artifact_repositories() {
+    local config="${1}"
+    local project_id
+    local repo_count
+    local repo_name
+    local repo_format
+    local repo_location
+    local repo_description
+    local created=0
+
+    check_file_exists "${config}"
+
+    project_id=$(yq e '.gcp.project-id' "${config}")
+    if [[ -z "${project_id}" ]]; then
+        log "ERROR" "Project ID not found in config.yml"
+        return 1
+    fi
+
+    repo_count=$(yq e '.gcp.artifact-repositories | length' "${config}")
+    if [[ "${repo_count}" -eq 0 ]]; then
+        log "INFO" "No artifact repositories defined in config.yml"
+        return 0
+    fi
+
+    log "INFO" "Creating ${repo_count} Artifact Registry repositories for project '${project_id}'..."
+
+    for i in $(seq 0 $((repo_count - 1))); do
+        repo_name=$(yq e ".gcp.artifact-repositories[${i}].name" "${config}")
+        repo_format=$(yq e ".gcp.artifact-repositories[${i}].format" "${config}")
+        repo_location=$(yq e ".gcp.artifact-repositories[${i}].region" "${config}")
+        repo_description=$(yq e ".gcp.artifact-repositories[${i}].description // \"Repository ${repo_name}\"" "${config}")
+
+        if [[ -z "${repo_name}" || -z "${repo_format}" || -z "${repo_location}" ]]; then
+            log "WARN" "Skipping invalid repository configuration at index ${i}"
+            continue
+        fi
+
+        log "INFO" "Checking existence of repository '${repo_name}' in '${repo_location}'..."
+        if gcloud artifacts repositories describe "${repo_name}" \
+            --location="${repo_location}" \
+            --project="${project_id}" &>/dev/null; then
+            log "INFO" "Repository '${repo_name}' already exists in '${repo_location}'. Skipping."
+            continue
+        fi
+
+        log "INFO" "Creating repository '${repo_name}' (format: ${repo_format}) in '${repo_location}'..."
+        if gcloud artifacts repositories create "${repo_name}" \
+            --repository-format="${repo_format}" \
+            --location="${repo_location}" \
+            --description="${repo_description}" \
+            --project="${project_id}" &> /dev/null; then
+            log "SUCCESS" "Repository '${repo_name}' created successfully."
+            ((created+=1))
+        else
+            log "ERROR" "Failed to create repository '${repo_name}' in '${repo_location}'."
+        fi
+    done
+
+    log "INFO" "Artifact repository creation complete. Total created:  ${created}/${repo_count}"
+}
+
+create_storage_buckets() {
+    local project_id="${1}"
+    local bucket_list="${2}"
+    local created=0
+
+    buckets_count=$(yq "length" <<< "${bucket_list}")
+    if [[ "${buckets_count}" -eq 0 ]]; then
+        log "INFO" "No storage buckets defined in config.yml"
+        return 0
+    fi
+
+    log "INFO" "Creating ${buckets_count} Storage Buckets for project '${project_id}'..."
+
+    for bucket_name in $(yq -r ".[]" <<< "${bucket_list}"); do
+        if [[ -z "${project_id}" || -z "${bucket_name}" ]]; then
+            log "WARN" "Skipping invalid storage bucket configuration at index ${i}"
+            continue
+        fi
+        
+        log "INFO" "Checking existence of storage bucket '${bucket_name}'..."
+        if gsutil list | grep "${bucket_name}" &> /dev/null; then
+            log "INFO" "Bucket '${bucket_name}' already exists. Skipping."
+            continue
+        fi
+
+        log "INFO" "Creating bucket '${bucket_name}'..."
+        if gsutil mb -b "on" -c "standard" \
+            -l "us-central1" -p "${project_id}" \
+            --retention "1d" "gs://${bucket_name}" &> /dev/null; then
+            log "SUCCESS" "Storage bucket '${bucket_name}' created successfully."
+
+            log "INFO" "Enabling object versioning..."
+            gsutil versioning set "on" "gs://${bucket_name}"
+            log "SUCCESS" "Objection versioning enabled."
+
+            log "INFO" "Removing retention policy..."
+            gcloud storage buckets update "gs://${bucket_name}" --clear-retention-period
+            log "SUCCESS" "Retention policy removed."
+
+            ((created+=1))
+        else
+            log "ERROR" "Failed to create bucket '${bucket_name}'."
+        fi
+    done
+
+    log "INFO" "Storage buckets creation complete. Total created:  ${created}/${buckets_count}"
+}
+
+create_service_account() {
+    local project_id="${1}"
+    local sa_name="${2}"
+    local sa_email="${3}"
+
+    if sa_exists "${project_id}" "${sa_email}"; then
+        log "INFO" "Service account '${sa_email}' already exists."
+    else
+        log "INFO" "Creating service account '${sa_email}'..."
+        gcloud iam service-accounts create "${sa_name}" \
+            --project="${project_id}" \
+            --description="Terraform SA to manage GCP infra" \
+            --display-name="Terraform SA"
+        log "SUCCESS" "Service account ${sa_email} created!"
+    fi
+}
+
+assign_iam_roles() {
+    local project_id="${1}"
+    local sa_email="${2}"
+    shift 2
+    local roles=("$@")
+
+    log "INFO" "Assigning IAM roles to service account '${sa_email}' in project '${project_id}'..."
+
+    for role in "${roles[@]}"; do
+        log "INFO" "Checking if '${sa_email}' already has role '${role}'..."
+        if gcloud projects get-iam-policy "${project_id}" \
+            --flatten="bindings[].members" \
+            --filter="bindings.role=${role} AND bindings.members:serviceAccount:${sa_email}" \
+            --format="value(bindings.members)" \
+            --quiet 2>/dev/null | grep -q "serviceAccount:${sa_email}"; then
+            log "INFO" "Role '${role}' already assigned to '${sa_email}'. Skipping."
+        else
+            log "INFO" "Assigning role '${role}' to '${sa_email}'..."
+            if gcloud projects add-iam-policy-binding "${project_id}" \
+                --member="serviceAccount:${sa_email}" \
+                --role="${role}" \
+                --quiet 1>/dev/null 2>/dev/null; then
+                log "SUCCESS" "Assigned role '${role}' to '${sa_email}'."
+            else
+                log "ERROR" "Failed to assign role '${role}' to '${sa_email}'."
+            fi
+        fi
+    done
+}
+
+create_service_account_key() {
+    local project_id="${1}"
+    local sa_email="${2}"
+    local sa_key_file="${3}"
+
+    log "INFO" "Generating service account key..."
+
+    if [[ -f "${sa_key_file}" ]]; then
+        log "WARN" "Service account key already exists at: ${sa_key_file}"
+    else
+        gcloud iam service-accounts keys create "${sa_key_file}" \
+            --iam-account="${sa_email}" \
+            --project="${project_id}"
+        log "SUCCESS" "Service account key generated!"
+    fi
+}
+
+main() {
+    local project_id
+    local project_name
+    local billing_account
+    local sa_name
+    local sa_email
+    local sa_key_file
+    local required_apis=()
+    local sa_iam_roles=()
+    local bucket_list
+
+    check_file_exists "${config}"
+
+    project_id=$(yq -r ".gcp.project-id" "${config}")
+    project_name=$(yq -r ".gcp.project-name" "${config}")
+    billing_account=$(gcloud billing accounts list --format="value(ACCOUNT_ID)" | head -n 1)
+    sa_name=$(yq -r ".gcp.service-account-name" "${config}")
+    sa_email="${sa_name}@${project_id}.iam.gserviceaccount.com"
+    sa_key_file="${ROLLINGUPS_ROOT_DIR}/$(yq -r ".gcp.service-account-key-file" "${config}")"
+    mapfile -t required_apis < <(yq -r ".gcp.required-apis[]" "${config}")
+    mapfile -t sa_iam_roles < <(yq -r ".gcp.service-account-iam-roles[]" "${config}")
+    bucket_list=$(yq -r ".gcp.storage-buckets" "${config}")
+
+    log "INFO" "Starting GCP project setup for '${project_id}'..."
+
+    create_project "${project_id}" "${project_name}" "${billing_account}"
+    wait_for_project_propagation "${project_id}"
+    wait_for_service_usage_visibility "${project_id}"
+    link_billing_account "${project_id}" "${billing_account}"
+    enable_apis "${project_id}" "${required_apis[@]}"
+    create_artifact_repositories "${config}"
+    create_storage_buckets "${project_id}" "${bucket_list}"
+    create_service_account "${project_id}" "${sa_name}" "${sa_email}"
+    assign_iam_roles "${project_id}" "${sa_email}" "${sa_iam_roles[@]}"
+    create_service_account_key "${project_id}" "${sa_email}" "${sa_key_file}"
+
+    log "INFO" "GCP project setup complete!"
+
+    echo ""
+    echo "Terraform Admin Service Account Credentials:"
+    echo "  - Project ID: ${project_id}"
+    echo "  - Service Account: ${sa_email}"
+    echo "  - SA Key File: ${sa_key_file}"
+    echo ""
+    echo "CI/CD Secrets to Store:"
+    echo "  TF_VAR_project_id=${project_id}"
+    echo "  GOOGLE_CREDENTIALS=$(base64 -w0 < "${sa_key_file}")"
+    echo ""
+}
+
+main

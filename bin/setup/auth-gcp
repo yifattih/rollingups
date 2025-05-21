@@ -1,0 +1,70 @@
+#!/bin/bash
+# -----
+# Script Name: auth-gcp
+# Description: 
+# Usage: 
+# Author: yifattih
+# Date: 04/28/2025
+# Other: ChatGPT assisted
+# -----
+
+set -euo pipefail
+
+# shellcheck disable=SC1091
+source "${ROLLINGUPS_ROOT_DIR}/bin/logging"
+
+credentialed_accounts_file() {
+    usage() {
+        echo -e "${YELLOW}Usage:${NC} credentialed_accounts_file <command>"
+        echo
+        echo -e "${YELLOW}Available commands:${NC}"
+        echo -e "  ${GREEN}create${NC}              Create credentialed accounts file"
+        echo -e "  ${GREEN}cleanup${NC}   Cleanup creadentialed accounts file"
+        echo
+        echo -e "${YELLOW}Example:${NC}"
+        echo -e "  credentialed_accounts_file create"
+        exit 1
+    }
+
+    if [[ $# -lt 1 ]]; then
+        clear
+        log "ERROR" "No option provided."
+        usage
+    fi
+
+    case "${1}" in
+        create)
+            bash "${ROLLINGUPS_ROOT_DIR}"/bin/google-cloud-sdk/bin/gcloud auth list --quiet > /tmp/gcp_credentialed_accounts 2>&1
+            ;;
+        cleanup)
+            rm /tmp/gcp_credentialed_accounts
+            ;;
+        *)
+            log "ERROR" "Invalid option ${1}"
+            usage
+            ;;
+    esac
+}
+
+authenticate() {
+    if grep "No credentialed accounts." < /tmp/gcp_credentialed_accounts >> /dev/null; then
+        stty sane
+        "${ROLLINGUPS_ROOT_DIR}"/bin/google-cloud-sdk/bin/gcloud auth login --launch-browser
+    fi
+}
+
+main() {
+    log "INFO" "Generating credentialied accounts file"
+    credentialed_accounts_file create
+    log "SUCCESS" "Credentialed accounts file generated!"
+
+    log "INFO" "Starting GCP authentication"
+    authenticate
+    log "SUCCESS" "GCP authentication complete!"
+
+    log "INFO" "Cleaning credentialed accounts file"
+    credentialed_accounts_file cleanup
+    log "SUCCESS" "Credentialed accounts file cleaned!"
+}
+
+main

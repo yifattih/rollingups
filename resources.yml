@@ -1,0 +1,57 @@
+gcp:
+    project-id: rollingups
+    project-name: rollingups
+    region: us-central1
+    artifact-repositories:
+        - name: alpha
+          format: docker
+          region: us-central1
+          description: Repository to store docker images for alpha deployment.
+        - name: production
+          format: docker
+          region: us-central1
+          description: Repository to store docker images for production deployment.
+    service-account-name: terraform-admin
+    service-account-key-file: gcp-key.json
+    required-apis:
+        - iam.googleapis.com
+        - iamcredentials.googleapis.com
+        - artifactregistry.googleapis.com
+        - run.googleapis.com
+        - storage.googleapis.com
+        - cloudresourcemanager.googleapis.com
+    service-account-iam-roles:
+        - roles/editor
+        - roles/iam.serviceAccountAdmin
+        - roles/iam.serviceAccountKeyAdmin
+        - roles/resourcemanager.projectIamAdmin
+        - roles/artifactregistry.admin
+        - roles/run.admin
+        - roles/storage.admin
+        - roles/storage.objectAdmin
+        - roles/resourcemanager.projectIamAdmin
+    storage-buckets:
+        - rollingups
+github:
+    owner: yifattih
+    repositories:
+        api:
+            name: rollingups-demo-api
+            visibility: private
+            secrets:
+                - name: GCP_REGION
+                  value: us-central1
+                - name: GCP_PROJECT_ID
+                  value: rollingups
+                - name: GCP_SERVICE_ACCOUNT_KEY
+                  value: /workspaces/rollingups/gcp-key.json
+        infra:
+            name: rollingups-demo-infra
+            visibility: private
+            secrets:
+                - name: GCP_REGION
+                  value: us-central1
+                - name: GCP_PROJECT_ID
+                  value: rollingups
+                - name: GCP_SERVICE_ACCOUNT_KEY
+                  value: /workspaces/rollingups/gcp-key.json

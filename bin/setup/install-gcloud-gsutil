@@ -1,0 +1,82 @@
+#!/bin/bash
+# -----
+# Script Name: install-gcloud-gsutil
+# Description: 
+# Usage: 
+# Author: yifattih
+# Date: 04/28/2025
+# Other: Main logic from https://cloud.google.com/sdk/docs/install#linux
+# -----
+
+set -euo pipefail
+
+# shellcheck disable=SC1091
+source "${ROLLINGUPS_ROOT_DIR}/bin/logging"
+
+check_dependencies() {
+    if ! type -p curl > /dev/null; then
+        sudo apt-get install curl -y
+    fi
+}
+
+download_google_sdk() {
+    curl -O https://dl.google.com/dl/cloudsdk/channels/rapid/downloads/google-cloud-cli-linux-x86_64.tar.gz
+    tar -xf google-cloud-cli-linux-x86_64.tar.gz
+    rm -rf google-cloud-cli-linux-x86_64.tar.gz
+}
+
+move_directory() {
+    mv google-cloud-sdk "${ROLLINGUPS_ROOT_DIR}"/bin
+}
+
+install_beta_component() {
+    "${ROLLINGUPS_ROOT_DIR}/bin/google-cloud-sdk/bin/gcloud" components install beta --quiet
+    gcloud config set disable_usage_reporting false
+    gcloud components update <<< "y" &> /dev/null
+}
+
+enable_command_completion() {
+    # shellcheck disable=SC1091
+    source "${ROLLINGUPS_ROOT_DIR}"/bin/google-cloud-sdk/path.bash.inc
+    {
+        echo -e "\n# GOOGLE CLOUD CLI AUTOCOMPLETION"
+        cat "${ROLLINGUPS_ROOT_DIR}/bin/google-cloud-sdk/completion.zsh.inc"
+    } >> ~/.zshr
+}
+
+create_symlinks() {
+    ln -s "${ROLLINGUPS_ROOT_DIR}/bin/google-cloud-sdk/bin/gcloud" "${ROLLINGUPS_ROOT_DIR}/bin/gcloud"
+    ln -s "${ROLLINGUPS_ROOT_DIR}/bin/google-cloud-sdk/bin/gsutil" "${ROLLINGUPS_ROOT_DIR}/bin/gsutil"
+}
+
+main() {
+     log "INFO" "Starting Google SDK install"
+    if [[ ! -f "${ROLLINGUPS_ROOT_DIR}/bin/google-cloud-sdk/bin/gcloud" ]]; then
+        log "INFO" "Checking dependencies"
+        check_dependencies
+        log "SUCCESS" "All required dependencies intalled!"
+
+        log "INFO" "Downloading Google SDK"
+        download_google_sdk
+        log "SUCCESS" "Download complete!"
+
+        log "INFO" "Moving google-cloud-sdk to /rollingups/bin"
+        move_directory
+        log "SUCCESS" "Move complete!"
+
+        log "INFO" "Installing beta component"
+        install_beta_component
+        log "SUCCESS" "Beta component intallation complete!"
+
+        log "INFO" "Enabling bash & zsh shells command completion"
+        enable_command_completion
+        log "SUCCESS" "Command completion enabled!"
+
+        log "INFO" "Creating symlinks"
+        create_symlinks
+        log "SUCCESS" "Symlinks created!"
+    fi
+    log "SUCCESS" "Google SDK intallation complete!"
+}
+
+main

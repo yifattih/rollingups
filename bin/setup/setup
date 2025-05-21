@@ -1,0 +1,38 @@
+#!/bin/bash
+# -----
+# Script Name: setup
+# Description: 
+# Usage: 
+# Author: yifattih
+# Creation Date: 4/26/2025
+# Other: -
+# -----
+
+set -euo pipefail
+
+script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &> /dev/null && pwd)
+# shellcheck disable=SC1091
+source "${ROLLINGUPS_ROOT_DIR}/bin/logging"
+
+
+log "INFO" "Installing GitHub CLI..."
+# shellcheck disable=SC1091
+source "${script_dir}"/install-gh
+
+log "INFO" "Authenticaing with GitHub and Enabling Scopes..."
+# shellcheck disable=SC1091
+source "${script_dir}"/auth-gh
+
+log "SUCCESS" "Github CLI installed & Logged With Required Scopes"
+
+log "INFO" "Installing Google SDK..."
+# shellcheck disable=SC1091
+source "${script_dir}"/install-gcloud-gsutil
+
+log "INFO" "Authenticating with GCP..."
+# shellcheck disable=SC1091
+source "${script_dir}"/auth-gcp
+
+log "SUCCESS" "Google Cloud SDK Installed & Logged GCP"
+
+log "WARN" "You need to open a new terminal session to activate the setup!"

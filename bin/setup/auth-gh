@@ -1,0 +1,44 @@
+#!/bin/bash
+# -----
+# Script Name: auth-gh
+# Description: 
+# Usage: 
+# Author: yifattih
+# Date: 04/28/2025
+# Other: ChatGPT assisted
+# -----
+
+set -euo pipefail
+
+# shellcheck disable=SC1091
+source "${ROLLINGUPS_ROOT_DIR}/bin/logging"
+
+###################################################################
+authenticate() {
+    if ! gh auth status >/dev/null 2>&1; then
+    stty sane
+    gh auth login --git-protocol https --web <<< "y"
+    fi
+}
+
+
+###################################################################
+enable_scope() {
+    if ! gh auth status | grep -q "delete_repo"; then
+        stty sane
+        gh auth refresh --hostname "github.com" --scopes delete_repo <<< "y"
+    fi
+}
+
+main() {
+    log "INFO" "Starting GitHub authentication"
+    authenticate
+    log "SUCCESS" "GitHub authentication complete!"
+
+    log "WARN" "GitHub CLI authentication do not enable deleting repositories scope by default"
+    log "WARN" "You must authorize GitHub CLI delete_repo scope"
+    enable_scope
+    log "SUCCESS" "Scope delete_repo enabled!"
+}
+
+main
