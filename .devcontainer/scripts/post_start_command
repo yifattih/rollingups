@@ -40,5 +40,5 @@ log::block
 log --line-after "Done !"
 log "NOTE"
 log "----------"
-log "Run 'bootstrap' to install required tools."
+log "Run 'rollingup setup' to setup the environment."
 log --line-after
