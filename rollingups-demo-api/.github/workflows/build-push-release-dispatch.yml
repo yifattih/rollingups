@@ -40,7 +40,7 @@ jobs:
         name: Deployment Environment Name
         runs-on: ubuntu-latest
         needs: release
-        if: ${{ needs.release.outputs.new_release_published }}
+        if: ${{ needs.release.outputs.new_release_published == 'true' }}
         outputs:
             name: ${{ steps.environment.outputs.env }}
         steps:
@@ -63,7 +63,7 @@ jobs:
         name: Service Name
         runs-on: ubuntu-latest
         needs: release
-        if: ${{ needs.release.outputs.new_release_published }}
+        if: ${{ needs.release.outputs.new_release_published == 'true' }}
         outputs:
             name: ${{ steps.service-name.outputs.name }}
         steps:
@@ -82,7 +82,7 @@ jobs:
             - release
             - environment
             - service-name
-        if: ${{ needs.release.outputs.new_release_published }}
+        if: ${{ needs.release.outputs.new_release_published == 'true' }}
         steps:
             - name: Checkout code
               uses: actions/checkout@v4
@@ -133,7 +133,7 @@ jobs:
             - environment
             - service-name
             - image
-        if: ${{ needs.release.outputs.new_release_published }}
+        if: ${{ needs.release.outputs.new_release_published == 'true' }}
         steps:
             - name: Dispatch required infra information
               uses: peter-evans/repository-dispatch@v3.0.0
