@@ -1,0 +1,33 @@
+#!/bin/bash
+# -----
+# Script Name: add-header-shell
+# Description: Appends a standardized header template to an existing bash shell script file.
+#                     The header includes fields for the script name, description, usage,
+#                     author, date (automatically populated with the current date), and other
+#                     notes.
+#                     It is intended to help maintain consistency and documentation across
+#                     multiple shell scripts by quickly adding a common header structure.
+# Usage: ./add-header-shell <name>
+# Author: yifattih
+# Date: 04/28/2025
+# Other: -
+# -----"
+add_header () {
+    touch  /tmp/temp_"${1}"
+    {
+        echo '#!/bin/bash'
+        echo "# -----"
+        echo "# Script Name: ${1}"
+        echo "# Description: "
+        echo "# Usage: "
+        echo "# Author: yifattih"
+        echo "# Date: $(date +'%m/%d/%Y')"
+        echo "# Other: "
+        echo "# -----"
+    } >> /tmp/temp_"${1}"
+    cat "${1}" >> /tmp/temp_"${1}"
+    mv /tmp/temp_"${1}" "${1}"
+    chmod +x "${1}"
+}
+
+add_header "${1}"

@@ -1,0 +1,47 @@
+#!/bin/bash
+# -----
+# Script Name: stylelog
+# Description: Custom utility script to style logging.
+# Usage: Must be sourced in the script that would use it.
+#            log <flags> "<message>"
+#            flags: -l | --line-after
+# Author: yifattih
+# Date: 04/26/2025
+# Other: -
+# -----
+log::block () {
+    count=0
+    clear
+}
+
+log::format_string () {
+    tput cup  "${count}" 0
+    echo "${@}"
+    count=$((count + 1))
+}
+
+log::process_input () {
+    while test ${#} -gt 0; do
+        case "${1}" in
+            -l | --line-after)
+                line_after=true
+                break
+                ;;
+            *)
+                line_after=false
+                break
+                ;;
+        esac
+    done
+
+    if ${line_after}; then
+        log::format_string "${2}"
+        count=$((count + 1))
+    else
+        log::format_string "${1}"
+    fi
+}
+
+log () {
+    log::process_input "${@}"
+}

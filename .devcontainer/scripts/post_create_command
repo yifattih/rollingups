@@ -1,0 +1,21 @@
+#!/bin/bash
+# -----
+# Script Name: post_create_command
+# Description: Outputs notice right after the devcontainer is running.
+# Usage: This script is intended solely for the devcontainer runtime process and is not
+#             meant for direct user interaction.
+# Author: yifattih
+# Date: 04/26/2025
+# Other: -
+# -----
+# shellcheck source=/dev/null
+script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &> /dev/null && pwd)
+source "${script_dir}"/stylelog
+
+log::block
+log --line-after "!  !  !    R U N N I N G    !  !  !"
+log "NOTE"
+log "----------"
+log "Features and extensions installation is in progress."
+log "It may require a few additional minutes to complete."
+log --line-after

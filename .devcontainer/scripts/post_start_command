@@ -1,0 +1,44 @@
+#!/bin/bash
+# -----
+# Script Name: post_start_command
+# Description: Appends paths to PATH variable and environment variables required by the
+#                    rollingups project.
+# Usage: This script is intended solely for the devcontainer runtime process and is not
+#             meant for direct user interaction.
+# Author: yifattih
+# Date: 04/26/2025
+# Other: -
+# -----
+# shellcheck source=/dev/null
+script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &> /dev/null && pwd)
+source "${script_dir}"/stylelog
+
+{
+    echo -e "\n# add-header-shell command"
+    echo "# Custom command to add header to named shell script"
+    # shellcheck disable=SC2016
+    echo 'if [[ ":${PATH}:" != *":'"${script_dir}"':"* ]]; then export PATH="${PATH}:'"${script_dir}"'"; fi'
+    echo "# Enable completion for add-header-shell"
+    echo 'compdef _gnu_generic add-header-shell'   # use _gnu_generic completion for normal behavior
+
+    echo -e "\n# rollingups command"
+    echo "# Custom command to handle project tasks like installing required tools, creating resources, etc"
+    # shellcheck disable=SC2016
+    echo 'if [[ ":${PATH}:" != *":'"$(pwd)/bin"':"* ]]; then export PATH="${PATH}:'"$(pwd)/bin"'"; fi'
+    echo "# Enable completion for rollingups"
+    echo 'compdef _gnu_generic rollingups'
+    echo "# Enable allowed options completion for rollingups"
+    echo "source $(pwd)/bin/rollingups-autocompletion"
+
+    echo -e "\n# Environment variable to set main directory"
+    echo "export ROLLINGUPS_ROOT_DIR=$(pwd)"
+} >> "${HOME}/.zshrc"
+
+sync "${HOME}/.zshrc"
+
+log::block
+log --line-after "Done !"
+log "NOTE"
+log "----------"
+log "Run 'bootstrap' to install required tools."
+log --line-after
