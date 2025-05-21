@@ -28,6 +28,20 @@ check_directory () {
     fi
 }
 
+intialize_repo() {
+    local name; name=$(basename "${1}")
+    local source_path="${1}"
+
+    log "INFO" "Initializing repository ${name}"
+    (
+        cd "${source_path}" || { log "ERROR" "Cannot cd into ${source_path}"; exit 1; }
+        git init &> /dev/null
+        git add . &> /dev/null
+        git commit -m "Initial commit" &> /dev/null
+    )
+    log "SUCCESS" "Repository ${name} initialized"
+}
+
 create_repo () {
     local name; name=$(basename "${1}")
     local visibility="${2}"
@@ -114,6 +128,7 @@ main () {
         source_path="${ROLLINGUPS_ROOT_DIR}/${repo_name}"
         check_directory "${source_path}"
 
+        intialize_repo "${source_path}"
         create_repo "${source_path}" "${visibility}"
         add_origin_remote "${source_path}"
         push_branches "${source_path}"
