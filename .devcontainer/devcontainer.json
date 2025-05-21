@@ -22,14 +22,13 @@
   // Features to add to the dev container. More info: https://containers.dev/features.
   "features": {
     "ghcr.io/devcontainers/features/docker-outside-of-docker:1": {
-      "moby": false,
       "installDockerBuildx": true,
       "installDockerComposeSwitch": true,
       "version": "20.10",
       "dockerDashComposeVersion": "v2"
     },
 
-    "ghcr.io/mikaello/devcontainer-features/modern-shell-utils:2": {}
+    "ghcr.io/mikaello/devcontainer-features/modern-shell-utils:2": {},
 
     // Other features per use case can be added here. For example:
     //"ghcr.io/devcontainers/features/python:1": {
@@ -44,6 +43,15 @@
     //"ghcr.io/devcontainers-extra/features/pre-commit:2": {
     //	"version": "latest"
     //}
+
+    "ghcr.io/devcontainers/features/terraform:1": {
+      "installSentinel": true,
+      "installTFsec": true,
+      "installTerraformDocs": true,
+      "version": "latest",
+      "tflint": "latest",
+      "terragrunt": "latest"
+    }
   },
 
   // Use 'forwardPorts' to make a list of ports inside the container available locally.
@@ -208,7 +216,10 @@
   },
 
   // Use 'postCreateCommand' to run commands after the container is created.
-  "postCreateCommand": "echo; echo ! ! !  C O N T A I N E R   I S    R U N N I N G  ! ! !; echo; echo Open a new terminal and run ./bootstrap to install required tools.; echo"
+  "postCreateCommand": "./.devcontainer/scripts/post_create_command",
+
+  // Use 'postCreateCommand' to run commands after the container started.
+  "postStartCommand": "./.devcontainer/scripts/post_start_command"
 
   // Uncomment to connect as root instead. More info: https://aka.ms/dev-containers-non-root.
   // "remoteUser": "root"
