@@ -22,7 +22,7 @@ check_file_exists() {
 }
 
 project_exists() {
-    gcloud projects describe "${1}" &>/dev/null
+    gcloud projects describe "${1}" >> /dev/null 2>&1
 }
 
 is_billing_linked() {
@@ -132,7 +132,7 @@ wait_for_service_usage_visibility() {
     log "INFO" "Waiting for project '${project_id}' to become visible to serviceusage.googleapis.com..."
 
     while (( attempt <= max_attempts )); do
-        if gcloud services list --project="${project_id}" --format="value(config.name)" &>/dev/null; then
+        if gcloud services list --project="${project_id}" --format="value(config.name)" >> /dev/null 2>&1; then
             log "INFO" "Project '${project_id}' is visible to serviceusage.googleapis.com."
             return 0
         else
@@ -248,7 +248,7 @@ create_artifact_repositories() {
         log "INFO" "Checking existence of repository '${repo_name}' in '${repo_location}'..."
         if gcloud artifacts repositories describe "${repo_name}" \
             --location="${repo_location}" \
-            --project="${project_id}" &>/dev/null; then
+            --project="${project_id}" >> /dev/null 2>&1; then
             log "INFO" "Repository '${repo_name}' already exists in '${repo_location}'. Skipping."
             continue
         fi
@@ -258,7 +258,7 @@ create_artifact_repositories() {
             --repository-format="${repo_format}" \
             --location="${repo_location}" \
             --description="${repo_description}" \
-            --project="${project_id}" &> /dev/null; then
+            --project="${project_id}" >> /dev/null 2>&1; then
             log "SUCCESS" "Repository '${repo_name}' created successfully."
             ((created+=1))
         else
@@ -289,7 +289,7 @@ create_storage_buckets() {
         fi
         
         log "INFO" "Checking existence of storage bucket '${bucket_name}'..."
-        if gsutil list | grep "${bucket_name}" &> /dev/null; then
+        if gsutil ls -p "${project_id}" | grep "${bucket_name}" >> /dev/null 2>&1; then
             log "INFO" "Bucket '${bucket_name}' already exists. Skipping."
             continue
         fi
@@ -297,7 +297,7 @@ create_storage_buckets() {
         log "INFO" "Creating bucket '${bucket_name}'..."
         if gsutil mb -b "on" -c "standard" \
             -l "us-central1" -p "${project_id}" \
-            --retention "1d" "gs://${bucket_name}" &> /dev/null; then
+            --retention "1d" "gs://${bucket_name}" >> /dev/null 2>&1; then
             log "SUCCESS" "Storage bucket '${bucket_name}' created successfully."
 
             log "INFO" "Enabling object versioning..."
