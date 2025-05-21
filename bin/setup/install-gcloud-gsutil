@@ -31,8 +31,8 @@ move_directory() {
 
 install_beta_component() {
     "${ROLLINGUPS_ROOT_DIR}/bin/google-cloud-sdk/bin/gcloud" components install beta --quiet
-    gcloud config set disable_usage_reporting false
-    gcloud components update <<< "y" &> /dev/null
+     "${ROLLINGUPS_ROOT_DIR}/bin/google-cloud-sdk/bin/gcloud" config set disable_usage_reporting false
+     "${ROLLINGUPS_ROOT_DIR}/bin/google-cloud-sdk/bin/gcloud" components update <<< "y" &> /dev/null
 }
 
 enable_command_completion() {
