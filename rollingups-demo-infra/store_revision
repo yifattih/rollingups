@@ -1,0 +1,20 @@
+#!/bin/bash
+# -----
+# Script Name: store_revision
+# Description: Store latest good revision name to GCS metadata bucket
+# Usage: Not intended to be run directly by user.
+# Author: yifattih
+# Date: 05/08/2025
+# Other: -
+# -----
+# 
+set -e
+
+REVISION_NAME="$1"
+BUCKET="$2"
+SERVICE="$3"
+
+FILE_PATH="${SERVICE}/latest_good_revision.txt"
+
+echo "Storing $REVISION_NAME to gs://${BUCKET}/${FILE_PATH}"
+echo "${REVISION_NAME}" | gsutil cp - "gs://${BUCKET}/${FILE_PATH}"

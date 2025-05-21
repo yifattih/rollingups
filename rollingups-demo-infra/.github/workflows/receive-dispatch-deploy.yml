@@ -1,0 +1,116 @@
+name: Receive Dispatch and Deploy
+on:
+    repository_dispatch:
+        types: [release]
+
+jobs:
+    deploy:
+        name: Deploy to GCP Cloud Run
+        runs-on: ubuntu-latest
+        steps:
+            - name: Checkout IaC repository
+              uses: actions/checkout@v4
+              with:
+                  token: ${{ secrets.GITHUB_TOKEN }}
+                  repository: ${{ github.repository }}
+                  ref: main
+
+            - name: Authenticate to Google Cloud
+              uses: google-github-actions/auth@v2.1.7
+              with:
+                  credentials_json: ${{ secrets.GCP_SERVICE_ACCOUNT_KEY }}
+
+            - name: "Set up Google Cloud SDK"
+              uses: "google-github-actions/setup-gcloud@v2"
+
+            - name: Set up Terraform
+              uses: hashicorp/setup-terraform@v3.1.2
+              with:
+                  terraform_version: 1.11.4
+
+            - name: Set up variables for Terraform automation deployment
+              run: |
+                  branch=${{ github.event.client_payload.branch }}
+                  environment=${{ github.event.client_payload.environment }}
+                  release_tag=${{ github.event.client_payload.release_tag }}
+                  service_name=${{ github.event.client_payload.service_name }}
+                  port=${{ github.event.client_payload.port }}
+
+                  location=${{ secrets.GCP_REGION }}
+                  project_id=${{ secrets.GCP_PROJECT_ID }}
+
+                  echo "branch=${branch}" >> ${GITHUB_ENV}
+                  echo "environment=${environment}" >> ${GITHUB_ENV}
+                  echo "release_tag=${release_tag}" >> ${GITHUB_ENV}
+                  echo "service_name=${service_name}" >> ${GITHUB_ENV}
+                  echo "port=${port}" >> ${GITHUB_ENV}
+
+                  echo "location=${location}" >> ${GITHUB_ENV}
+                  echo "project_id=${project_id}" >> ${GITHUB_ENV}
+
+            - name: Composing additional variables from payload and secrets
+              run: |
+                  tag=${release_tag//./-}
+                  revision_name=${service_name}-${tag}
+                  ingress_image=${location}-docker.pkg.dev/${project_id}/${environment}/${service_name}:${release_tag}
+
+                  echo "tag=${tag}" >> ${GITHUB_ENV}
+                  echo "revision_name=${revision_name}" >> ${GITHUB_ENV}
+                  echo "ingress_image=${ingress_image}" >> ${GITHUB_ENV}
+
+            - name: Deploy
+              id: deploy
+              run: ./deploy
+
+            - name: Full rollout
+              if: ${{ steps.deploy.outputs.status == 'success' }}
+              run: ./deploy
+
+            - name: Rollback
+              if: ${{ steps.deploy.outputs.status == 'failure' }}
+              env:
+                  release_strategy: rollback
+              run: ./deploy
+            # - name: Initialize Terraform
+            #   run: |
+            #       cd gcp
+            #       terraform init
+
+            # - name: Validate Terraform configuration
+            #   run: |
+            #       cd gcp
+            #       terraform validate
+
+            # - name: Apply Terraform configuration using revision-aware script
+            #   run: |
+            #       bash deploy_with_revision \
+            #         --project-id "${{ GCP_PROJECT_ID }}" \
+            #         --region "${{ secrets.GCP_REGION }}" \
+            #         --service-name "${{ github.event.client_payload.service_name }}" \
+            #         --image "${{ secrets.GCP_REGION }}-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/${{ github.event.client_payload.environment }}/${{ github.event.client_payload.service_name }}:${{ github.event.client_payload.release_tag }}" \
+            #         --port "${{ PORT }}"
+
+            # - name: Get latest deployed revision
+            #   id: get_latest_revision
+            #   run: |
+            #       GCP_REGION="${{ secrets.GCP_REGION }}"
+            #       GCP_PROJECT_ID="${{ secrets.GCP_PROJECT_ID }}"
+            #       SERVICE_NAME="${{ github.event.client_payload.service_name }}"
+
+            #       REVISION=$(gcloud run services describe ${SERVICE_NAME} \
+            #           --region=${GCP_REGION} \
+            #           --project=${GCP_PROJECT_ID} \
+            #           --format="value(status.latestReadyRevisionName)")
+
+            #       echo "revision=${REVISION}" >> "${GITHUB_OUTPUT}"
+
+            # - name: Store latest good revision
+            #   run: |
+            #       REVISION_NAME="${{ steps.get_latest_revision.outputs.revision }}"
+            #       BUCKET="${{ secrets.GCP_PROJECT_ID }}"
+            #       SERVICE="${{  github.event.client_payload.service_name  }}"
+
+            #       ./store_revision \
+            #           "${REVISION_NAME}" \
+            #           "${BUCKET}" \
+            #           "${SERVICE}"

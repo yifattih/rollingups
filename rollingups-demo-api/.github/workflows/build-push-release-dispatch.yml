@@ -1,0 +1,144 @@
+name: Release, Build, Push, and Dispatch
+on:
+    push:
+        branches:
+            - main
+            - alpha
+
+jobs:
+    release:
+        name: Make Release
+        runs-on: ubuntu-latest
+        permissions: write-all
+        env:
+            GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        outputs:
+            tag: ${{ steps.semantic-release.outputs.new_release_version }}
+        steps:
+            - name: Checkout
+              uses: actions/checkout@v4
+            - uses: actions/setup-node@v4.1.0
+              with:
+                  node-version: "lts/*"
+
+            - name: Semantic Release
+              uses: cycjimmy/semantic-release-action@v4.2.0
+              id: semantic-release
+              with:
+                  semantic_version: 24.2.3
+                  branches: |
+                      ['+([0-9])?(.{+([0-9]),x}).x', 'main', { name: 'alpha', prerelease: true}]
+                  extra_plugins: |
+                      @semantic-release/commit-analyzer
+                      @semantic-release/release-notes-generator
+                      @semantic-release/github
+                      @semantic-release/changelog
+                      @semantic-release/git
+
+    environment:
+        name: Deployment Environment Name
+        runs-on: ubuntu-latest
+        outputs:
+            name: ${{ steps.environment.outputs.env }}
+        steps:
+            - name: Generate deployment environment name
+              id: environment
+              run: |
+                  case ${{ github.ref_name }} in
+                      main)
+                          echo "env=production" >> ${GITHUB_OUTPUT}
+                          ;;
+                      alpha)
+                          echo "env=alpha" >> ${GITHUB_OUTPUT}
+                          ;;
+                      *)
+                          echo "env=invalid" >> ${GITHUB_OUTPUT}
+                          ;;
+                  esac
+
+    service-name:
+        name: Service Name
+        runs-on: ubuntu-latest
+        outputs:
+            name: ${{ steps.service-name.outputs.name }}
+        steps:
+            - name: Generate service name
+              id: service-name
+              run: |
+                  repository=${{ github.repository }}
+                  repository_name=${repository##*/}
+                  service_name="${repository_name##*-}"
+                  echo "name=${service_name}" >> ${GITHUB_OUTPUT}
+
+    image:
+        name: Image
+        runs-on: ubuntu-latest
+        needs:
+            - release
+            - environment
+            - service-name
+        steps:
+            - name: Checkout code
+              uses: actions/checkout@v4
+              with:
+                  token: ${{ secrets.GITHUB_TOKEN }}
+                  ref: ${{ github.ref_name }}
+
+            - name: Build Image
+              run: |
+                  region=${{ secrets.GCP_REGION }}
+                  project_id=${{ secrets.GCP_PROJECT_ID }}
+                  registry_url="${region}-docker.pkg.dev/${project_id}"
+                  environment=${{ needs.environment.outputs.name }}
+                  service_name=${{ needs.service-name.outputs.name }}
+                  release_tag=${{ needs.release.outputs.tag }}
+                  image_tag="${registry_url}/${environment}/${service_name}:${release_tag}"
+                  DOCKER_BUILDKIT=1 docker build --progress=plain -t ${image_tag} .
+
+            - name: Authenticate to Google Cloud
+              uses: google-github-actions/auth@v2.1.7
+              with:
+                  credentials_json: ${{ secrets.GCP_SERVICE_ACCOUNT_KEY }}
+
+            - name: Set up Cloud SDK
+              uses: "google-github-actions/setup-gcloud@v2.1.4"
+
+            - name: Configure Docker to use gcloud
+              run: gcloud auth configure-docker ${{ secrets.GCP_REGION }}-docker.pkg.dev
+
+            - name: Push Image
+              run: |
+                  region=${{ secrets.GCP_REGION }}
+                  project_id=${{ secrets.GCP_PROJECT_ID }}
+                  registry_url="${region}-docker.pkg.dev/${project_id}"
+                  environment=${{ needs.environment.outputs.name }}
+                  service_name=${{ needs.service-name.outputs.name }}
+                  release_tag=${{ needs.release.outputs.tag }}
+                  image_tag="${registry_url}/${environment}/${service_name}:${release_tag}"
+                  # Push with only meaningful output
+                  docker push ${image_tag} \
+                    | grep -E "(pushed|waiting|layer|digest|error|denied|unauthorized)"
+
+    dispatch:
+        name: Dispatch Information
+        runs-on: ubuntu-latest
+        needs:
+            - release
+            - environment
+            - service-name
+            - image
+        steps:
+            - name: Dispatch required infra information
+              uses: peter-evans/repository-dispatch@v3.0.0
+              with:
+                  token: ${{ secrets.PAT }}
+                  repository: yifattih/rollingups-test-infra
+                  event-type: release
+                  client-payload: |
+                      {
+                          "branch":"${{ github.ref_name }}",
+                          "environment":"${{ needs.environment.outputs.name }}",
+                          "release_tag":"${{ needs.release.outputs.tag || 'invalid' }}",
+                          "service_name":"${{ needs.service-name.outputs.name }}",
+                          "port":"8000"
+                      }

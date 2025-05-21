@@ -1,0 +1,1 @@
+Codebase of a simple service for Rollings Updates Example project.

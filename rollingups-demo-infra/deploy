@@ -1,0 +1,454 @@
+#!/bin/bash
+# -----
+# Script Name: deploy
+# Description: Deploy a service to GCP Cloud Run using Terraform
+# Usage: Not intended to be run directly by user
+# Author: yifattih
+# Date: 05/08/2025
+# Other: ChatGPT assisted
+# -----
+
+set -e
+
+log() {
+    : Description:
+    :   Function to log message in a consistent structured format
+    : Arguments:
+    :   "${1}" - log level '[INFO | WARN | ERROR | SUCCESS]'
+    :   "${2}" - message to log
+
+    local level="${1}"
+    local message="${2}"
+
+    echo -e "[${level}] $(date +'%Y-%m-%d %H:%M:%S') - ${message}" >&2
+}
+
+countdown() {
+    : Description
+    :   Function to display a countdown message
+    : Arguments:
+    :   "${1}" - number of seconds for the delay
+
+    for ((i="${1}"; i>0; i--)); do
+        echo -ne "\r[INFO] Continuing in ${i}s..."  # overwrite the entire line
+        sleep 1
+    done
+
+    echo -ne "\r\033[K"  # clear the line after countdown finishes
+}
+
+check_variable() {
+    : Description:
+    :   Function to check if enviroment variable is set
+    : Arguments:
+    :   "${*}" - array of environment variable names to check
+
+    local variables="${*}"
+
+    log "INFO" "Checking required environment variables: ${variables}"
+
+    for variable in ${variables}; do
+        if [[ -z "${!variable}" ]]; then
+            log "ERROR" "Environment variable '${variable}' not set"
+            return 1
+        fi
+    done
+
+    log "INFO" "Required environment variables exist"
+    return 0
+}
+
+service_exist() {
+    : Description:
+    :   Function to check if service exists
+    : Required Global Arguments:
+    :   project_id - GCP project ID
+    :   region - GCP region
+    :   service_name - GCP service name
+
+    check_variable project_id location service_name
+
+    local service_name="${service_name}"
+    local location="${location}"
+    local project_id="${project_id}"
+
+    log "INFO" "Checking if service '${service_name}' exists in project '${project_id}' and region '${location}'"
+
+    if ! gcloud run services describe "${service_name}" --region="${location}" \
+    --project="${project_id}" > /dev/null 2>&1; then
+        log "INFO" "Service '${service_name}' does not exists"
+        return 1
+    fi
+
+    log "INFO" "Service '${service_name}' exists"
+    return 0
+}
+
+read_gcs_file_content() {
+    : Description:
+    :   Function to read stable revision from GCS
+    : Required Global Arguments:
+    :   project_id - GCP project ID
+    :   service_name - GCP service name
+    : Required Function Arguments:
+    :   file_name - name of the file to read from GCS
+    : Returns:
+    :   file_content - content of the file read from GCS
+
+    check_variable project_id service_name
+
+    if [ $# -eq 0 ]; then
+        log "ERROR" "File name is required"
+        return 1
+    fi
+
+    log "INFO" "Reading ${file_name} from GCS"
+
+    local project_id="${project_id}"
+    local service_name="${service_name}"
+    local file_name="${1}"
+    local file_path="${service_name}/${file_name}"
+
+    if ! gsutil ls "gs://${project_id}/${file_path}" > /dev/null 2>&1; then
+        log "ERROR" "File not found: gs://${project_id}/${file_path}"
+        return 1
+    fi
+
+    file_content=$(gsutil cat "gs://${project_id}/${file_path}")
+
+    log "INFO" "File ${file_name} read successfully"
+    echo "${file_content}"
+}
+
+detect_release_strategy() {
+    : Description:
+    :   Function to detect the release strategy for deployment
+
+    log "INFO" "Detecting release strategy"
+
+    if [ "${release_strategy}" = "rollback" ]; then        
+        log "INFO" "Release strategy set to: ${release_strategy}"
+        return 0
+    fi
+
+    if ! service_exist; then
+        log "INFO" "Service does not exist"
+        release_strategy="first_deploy"
+        log "INFO" "Release strategy set to: ${release_strategy}"
+        export release_strategy="${release_strategy}"
+        return 0
+    fi
+
+    log "INFO" "Service exists"
+
+    log "INFO" "Fetching stable revision name from GCS"
+    stable_revision_name=$(read_gcs_file_content "stable_revision_name.txt")
+    log "SUCCESS" "Stable revision name: ${stable_revision_name}"
+    export stable_revision_name="${stable_revision_name}"
+
+    log "INFO" "Fetching stable revision image from GCS"
+    stable_revision_image=$(read_gcs_file_content "stable_revision_image.txt")
+    log "SUCCESS" "Stable Revision image: ${stable_revision_image}"
+    export stable_revision_image="${stable_revision_image}"
+
+    if [ "${stable_revision_image} " != "${ingress_image}" ]; then
+        log "INFO" "Stable revision image is different from the current image"
+        release_strategy="canary"
+        log "INFO" "Release strategy set to: ${release_strategy}"
+        export release_strategy="${release_strategy}"
+        return 0
+    fi
+
+    log "INFO" "Stable revision image is the same as the current image"
+    release_strategy="full_rollout"
+    log "INFO" "Release strategy set to: ${release_strategy}"
+    export release_strategy="${release_strategy}"
+    return 0
+}
+
+tf_plan() {
+    : Description:
+    :   Function to generate a Terraform plan file
+    : Required Global Arguments:
+    :   project_id
+    :   location
+    :   ingress_image
+    :   port
+    :   release_strategy
+    :   service_name
+    :   revision_name
+    :   stable_revision
+
+    check_variable project_id location ingress_image port service_name revision_name release_strategy
+
+    local project_id="${project_id}"
+    local location="${location}"
+    local ingress_image="${ingress_image}"
+    local port="${port}"
+    local service_name="${service_name}"
+    local revision_name="${revision_name}"
+    local stable_revision="${stable_revision_name:-null}"
+    local release_strategy="${release_strategy}"
+
+    log "INFO" "Making terraform plan"
+
+    if ! terraform plan -var "location=${location}"  -var "project_id=${project_id}" \
+    -var "ingress_image=${ingress_image}" -var "ingress_port=${port}" \
+    -var "service_name=${service_name}"  -var "revision_name=${revision_name}" \
+    -var "stable_revision=${stable_revision}" -var "release_strategy=${release_strategy}" \
+    -out "./${revision_name}-${release_strategy}.tfplan" > terraform_plan.log 2>&1; then
+        log "ERROR" "Terraform failed creating plan file"
+        cat terraform_plan.log
+        return 1
+    fi
+
+    log "SUCCESS" "Terraform plan created successfully"
+    log "INFO" "Terraform plan file: ${revision_name}-${release_strategy}.tfplan"
+}
+
+main() {
+    : Description:
+    :   Main function to run the script
+    : Required Global Arguments:
+    :   project_id
+    :   location
+    :   service_name
+    :   ingress_image
+    :   port
+    :   revision_name
+    :   tag
+    :   release_tag
+    :   environment
+
+    check_variable project_id location service_name ingress_image port revision_name tag release_tag environment
+    detect_release_strategy
+
+    log "INFO" "Moving to the api infra configuration directory"
+    cd api
+    log "SUCCESS" "Inside api infra configuration directory"
+
+    log "INFO" "Initializing terraform"
+    terraform init > terraform_init.log 2>&1 \
+    && log "SUCCESS" "Terraform initialized successfully" \
+    || log "ERROR" "Terraform initialization failed" \
+    && cat terraform_init.log
+
+    log "INFO" "Validating terraform configuration"
+    terraform validate > terraform_validate.log 2>&1 \
+    && log "SUCCESS" "Terraform configuration is valid" \
+    || log "ERROR" "Terraform validation failed" \
+    && cat terraform_validate.log
+
+    log "INFO" "Making terraform plan"
+    tf_plan > terraform_plan.log 2>&1 \
+    && log "SUCCESS" "Terraform plan created successfully" \
+    || log "ERROR" "Terraform plan failed" \
+    && cat terraform_plan.log
+
+    log "INFO" "Applying terraform plan"
+    terraform apply "${revision_name}-${release_strategy}.tfplan" > terraform_apply.log 2>&1 \
+    && log "SUCCESS" "Terraform plan applied successfully" \
+    || log "ERROR" "Terraform apply failed" \
+    && cat terraform_apply.log
+
+    log "INFO" "Waiting for revision to appear and become active"
+    countdown 60
+    if service_exist; then
+        log "Deployment execution successful"
+    else
+        log "ERROR" "Deployment execution failed"
+    fi
+}
+
+main
+
+#  To get the revision image string
+# gcloud run revisions describe "api-00001-b7b" --project "rmr-projection" --region "us-central1" --format="value(spec.containers[0].image)"
+
+##################################################################
+##################################################################
+##################################################################
+##################################################################
+##################################################################
+##################################################################
+##################################################################
+##################################################################
+##################################################################
+##################################################################
+# log "INFO" "Setting up terraform variables..."
+# #  Data comming from repo dispatch payload
+# branch=main # maybe not needed
+# environment=production
+# release_tag=1.0.0
+# service_name=api
+# port=8000
+# # Repository secrets
+# location="us-central1"
+# project_id="rollingups"
+# # Variables composed from repo dispatch payload and secrets
+# tag=${release_tag//./-} # replace dots with dashes to complain with RFC 1035 Naming Rules as enforced by GCP Cloud Run
+# revision_name="${service_name}-${tag}"
+# ingress_image="${location}-docker.pkg.dev/${project_id}/${environment}/service-1:${release_tag}"
+# # Variables detected by automation
+# #  Right now, I am setting them manually for testing purposes
+# #  In the future, they will be set by the automation
+# release_strategy="first_deploy"
+# log "SUCCESS" "Terraform variables set successfully"
+
+# log "INFO" "Making terraform plan..."
+# terraform plan \
+#     -var "location=${location}"  \
+#     -var "project_id=${project_id}" \
+#     -var "ingress_image=${ingress_image}" \
+#     -var "ingress_port=${port}" \
+#     -var "release_strategy=${release_strategy}" \
+#     -var "service_name=${service_name}" \
+#     -var "revision_name=${revision_name}" \
+#     -out "./${revision_name}-${release_strategy}.tfplan"
+# log "SUCCESS" "Terraform plan created successfully"
+
+# log "INFO" "Applying terraform plan..."
+# terraform apply "${revision_name}-${release_strategy}.tfplan"
+# log "SUCCESS" "Terraform plan applied successfully"
+
+# countdown 90
+
+# ###################################################################
+# ###################################################################
+# ###################################################################
+# log "INFO" "Setting up terraform variables..."
+# #  Data comming from repo dispatch payload
+# branch=main # maybe not needed
+# environment=production
+# release_tag=1.0.1
+# service_name=api
+# port=8000
+# # Repository secrets
+# location="us-central1"
+# project_id="rollingups"
+# # Variables composed from repo dispatch payload and secrets
+# tag=${release_tag//./-} # replace dots with dashes to complain with RFC 1035 Naming Rules as enforced by GCP Cloud Run
+# revision_name="${service_name}-${tag}"
+# ingress_image="${location}-docker.pkg.dev/${project_id}/${environment}/service-1:${release_tag}"
+# # Variables detected by automation
+# #  Right now, I am setting them manually for testing purposes
+# #  In the future, they will be set by the automation
+# release_strategy="canary"
+# log "SUCCESS" "Terraform variables set successfully"
+
+# log "INFO" "Making terraform plan..."
+# terraform plan \
+#     -var "location=${location}"  \
+#     -var "project_id=${project_id}" \
+#     -var "ingress_image=${ingress_image}" \
+#     -var "ingress_port=${port}" \
+#     -var "release_strategy=${release_strategy}" \
+#     -var "service_name=${service_name}" \
+#     -var "revision_name=${revision_name}" \
+#     -var "stable_revision=${service_name}-1-0-0" \
+#     -out "./${revision_name}-${release_strategy}.tfplan"
+# log "SUCCESS" "Terraform plan created successfully"
+
+# log "INFO" "Applying terraform plan..."
+# terraform apply "${revision_name}-${release_strategy}.tfplan"
+# log "SUCCESS" "Terraform plan applied successfully"
+
+# countdown 90
+# ###################################################################
+# ###################################################################
+# ###################################################################
+# log "INFO" "Setting up terraform variables..."
+# #  Data comming from repo dispatch payload
+# branch=main # maybe not needed
+# environment=production
+# release_tag=1.0.1
+# service_name=api
+# port=8000
+# # Repository secrets
+# location="us-central1"
+# project_id="rollingups"
+# # Variables composed from repo dispatch payload and secrets
+# tag=${release_tag//./-} # replace dots with dashes to complain with RFC 1035 Naming Rules as enforced by GCP Cloud Run
+# revision_name="${service_name}-${tag}"
+# ingress_image="${location}-docker.pkg.dev/${project_id}/${environment}/service-1:${release_tag}"
+# # Variables detected by automation
+# #  Right now, I am setting them manually for testing purposes
+# #  In the future, they will be set by the automation
+# release_strategy="full_rollout"
+# log "SUCCESS" "Terraform variables set successfully"
+
+# log "INFO" "Making terraform plan..."
+# terraform plan \
+#     -var "location=${location}"  \
+#     -var "project_id=${project_id}" \
+#     -var "ingress_image=${ingress_image}" \
+#     -var "ingress_port=${port}" \
+#     -var "release_strategy=${release_strategy}" \
+#     -var "service_name=${service_name}" \
+#     -var "revision_name=${revision_name}" \
+#     -out "./${revision_name}-${release_strategy}.tfplan"
+# log "SUCCESS" "Terraform plan created successfully"
+
+# log "INFO" "Applying terraform plan..."
+# terraform apply "${revision_name}-${release_strategy}.tfplan"
+# log "SUCCESS" "Terraform plan applied successfully"
+
+# countdown 90
+# ###################################################################
+# ###################################################################
+# ###################################################################
+# log "INFO" "Setting up terraform variables..."
+# #  Data comming from repo dispatch payload
+# branch=main # maybe not needed
+# environment=production
+# release_tag=1.0.0
+# service_name=api
+# port=8000
+# # Repository secrets
+# location="us-central1"
+# project_id="rollingups"
+# # Variables composed from repo dispatch payload and secrets
+# tag=${release_tag//./-} # replace dots with dashes to complain with RFC 1035 Naming Rules as enforced by GCP Cloud Run
+# revision_name="${service_name}-${tag}"
+# ingress_image="${location}-docker.pkg.dev/${project_id}/${environment}/service-1:${release_tag}"
+# # Variables detected by automation
+# #  Right now, I am setting them manually for testing purposes
+# #  In the future, they will be set by the automation
+# release_strategy="rollback"
+# log "SUCCESS" "Terraform variables set successfully"
+
+# log "INFO" "Making terraform plan..."
+# terraform plan \
+#     -var "location=${location}"  \
+#     -var "project_id=${project_id}" \
+#     -var "ingress_image=${ingress_image}" \
+#     -var "ingress_port=${port}" \
+#     -var "release_strategy=${release_strategy}" \
+#     -var "service_name=${service_name}" \
+#     -var "revision_name=${revision_name}" \
+#     -var "stable_revision=${service_name}-1-0-0" \
+#     -out "./${revision_name}-${release_strategy}.tfplan"
+# log "SUCCESS" "Terraform plan created successfully"
+
+# log "INFO" "Applying terraform plan..."
+# terraform apply "${revision_name}-${release_strategy}.tfplan"
+# log "SUCCESS" "Terraform plan applied successfully"
+
+# countdown 90
+
+# log "INFO" "Creating terraform plan to destroy resources..."
+# terraform plan \
+#     -destroy \
+#     -var "location=${location}"  \
+#     -var "project_id=${project_id}" \
+#     -var "ingress_image=${ingress_image}" \
+#     -var "ingress_port=${port}" \
+#     -var "release_strategy=${release_strategy}" \
+#     -var "service_name=${service_name}" \
+#     -var "revision_name=${revision_name}" \
+#     -out "./${revision_name}-${release_strategy}-destroy.tfplan"
+# log "SUCCESS" "Terraform destroy plan created successfully"
+
+# log "INFO" "Applying terraform destroy plan..."
+# terraform apply "${revision_name}-${release_strategy}-destroy.tfplan"
+# log "SUCCESS" "Terraform destroy plan applied successfully"
