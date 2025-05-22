@@ -62,12 +62,20 @@ jobs:
               id: deploy
               run: ./deploy
 
+            - name: Health check
+              id: health_check
+              run: |
+                  health_endpoint="${service_ul}/health"
+                  status_code=$(curl -LI "$HEALTH_ENDPOINT" -o /dev/null -w '%{http_code}\n' -s)
+                  echo "Health check status code: ${status_code}"
+                  echo "status_code=${status_code}" >> "${GITHUB_OUTPUT}"
+
             - name: Full rollout
-              if: ${{ steps.deploy.outputs.status == 'success' }}
+              if: ${{ steps.health_check.outputs.status_code == '200' }}
               run: ./deploy
 
             - name: Rollback
-              if: ${{ steps.deploy.outputs.status == 'failure' }}
+              if: ${{ steps.health_check.outputs.status_code != '200' }}
               env:
                   release_strategy: rollback
               run: ./deploy
