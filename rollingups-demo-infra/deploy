@@ -297,10 +297,15 @@ main() {
         log "ERROR" "Deployment execution failed"
     fi
 
-    if [ "${release_strategy}" = "first_deploy" ] || [ "${release_strategy}" = "full_rollout" ]; then
+    if [ "${release_strategy}" = "full_rollout" ]; then
         store_file_to_gcs "${revision_name}" "stable_revision_name.txt"
         store_file_to_gcs  "${ingress_image}" "stable_revision_image.txt"
     fi
+
+    log "INFO" "Exporting service URL as environment variable"
+    service_url=$(terraform output -raw cloud_run_url)
+    echo "service_url: ${service_url}" >> "${GITHUB_ENV}"
+    log "SUCCESS" "Service URL exported as environment variable"
 }
 
 main
