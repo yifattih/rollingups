@@ -107,14 +107,14 @@ read_gcs_file_content() {
     local project_id="${project_id}"
     local service_name="${service_name}"
     local file_name="${1}"
-    local file_path="${service_name}/${file_name}"
+    local file_path="gs://${project_id}/${service_name}/${file_name}"
 
-    if ! gsutil ls "gs://${project_id}/${file_path}" > /dev/null 2>&1; then
-        log "ERROR" "File not found: gs://${project_id}/${file_path}"
+    if ! gsutil ls "${file_path}" > /dev/null 2>&1; then
+        log "ERROR" "File not found: ${file_path}"
         return 1
     fi
 
-    file_content=$(gsutil cat "gs://${project_id}/${file_path}")
+    file_content=$(gsutil cat "${file_path}")
 
     log "INFO" "File ${file_name} read successfully"
     echo "${file_content}"
@@ -206,6 +206,44 @@ tf_plan() {
     log "INFO" "Terraform plan file: ${revision_name}-${release_strategy}.tfplan"
 }
 
+store_file_to_gcs() {
+    : Description:
+    :   Function to store a file to GCS
+    : Required Global Arguments:
+    :   project_id
+    :   service_name
+    : Required Function Arguments:
+    :   file_name - name of the file to store in GCS
+
+    check_variable project_id service_name
+
+    if [ $# -lt 2 ]; then
+        log "ERROR" "You must provide 2 arguments: data and file_name"
+        return 1
+    fi
+
+    local project_id="${project_id}"
+    local service_name="${service_name}"
+    local data="${1}"
+    local file_name="${2}"
+    local file_path="gs://${project_id}/${service_name}/${file_name}"
+
+    log "INFO" "Storing data to ${file_name}"
+
+    echo "${data}" >> "${file_name}"
+    
+    log "SUCCESS" "Data stored in ${file_name}"
+
+    log "INFO" "Storing ${file_name} to GCS"
+
+    if ! gsutil cp "${file_name}" "${file_path}"; then
+        log "ERROR" "Failed to store ${file_name} to GCS"
+        return 1
+    fi
+
+    log "SUCCESS" "${file_name} successfully stored in GCS"
+}
+
 main() {
     : Description:
     :   Main function to run the script
@@ -254,9 +292,14 @@ main() {
     log "INFO" "Waiting for revision to appear and become active"
     countdown 60
     if service_exist; then
-        log "Deployment execution successful"
+        log "Deployment execution succeeded"
     else
         log "ERROR" "Deployment execution failed"
+    fi
+
+    if [ "${release_strategy}" = "first_deploy" ] || [ "${release_strategy}" = "full_rollout" ]; then
+        store_file_to_gcs "${revision_name}" "stable_revision_name.txt"
+        store_file_to_gcs  "${ingress_image}" "stable_revision_image.txt"
     fi
 }
 
