@@ -1,4 +1,5 @@
-name: Release, Build, Push, and Dispatch
+name: Release, Build & Push Image, and Dispatch
+run-name: Release, Build & Push Image, and Dispath by @${{ github.actor }}
 on:
     push:
         branches:
@@ -139,7 +140,7 @@ jobs:
               uses: peter-evans/repository-dispatch@v3.0.0
               with:
                   token: ${{ secrets.PAT }}
-                  repository: yifattih/rollingups-test-infra
+                  repository: yifattih/rollingups-demo-infra
                   event-type: release
                   client-payload: |
                       {
