@@ -46,6 +46,7 @@ resource "google_cloud_run_v2_service" "this" {
       type     = traffic.value.type
       revision = lookup(traffic.value, "revision", null)
       percent  = traffic.value.percent
+      tag      = lookup(traffic.value, "tag", null)
     }
   }
 }
