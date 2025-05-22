@@ -14,8 +14,10 @@ locals {
         percent  = 90
       },
       {
-        type    = "TRAFFIC_TARGET_ALLOCATION_TYPE_LATEST"
-        percent = 10
+        type     = "TRAFFIC_TARGET_ALLOCATION_TYPE_REVISION"
+        revision = var.revision_name
+        tag      = "staging"
+        percent  = 10
       }
     ] :
     #  first_deploy and full_rollout handled together
