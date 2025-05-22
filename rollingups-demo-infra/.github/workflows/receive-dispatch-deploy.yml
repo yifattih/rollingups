@@ -1,4 +1,5 @@
 name: Receive Dispatch and Deploy
+run-name: "Deploy Using Received Dispatch From: ${{ github.event.client_payload.service_name }}"
 on:
     repository_dispatch:
         types: [release]
@@ -59,14 +60,19 @@ jobs:
                   echo "ingress_image=${ingress_image}" >> ${GITHUB_ENV}
 
             - name: Deploy
-              id: deploy
               run: ./deploy
 
             - name: Health check
               id: health_check
               run: |
-                  health_endpoint="${service_ul}/health"
-                  status_code=$(curl -LI "$HEALTH_ENDPOINT" -o /dev/null -w '%{http_code}\n' -s)
+                  if [ "${applied_release_strategy}" = "canary" ]; then
+                      service_url=$(gcloud run services describe "${service_name}" \
+                      --region "${location}" --project "${project_id}" \
+                      --format="value(status.traffic[1].url)")
+                  fi
+
+                  health_endpoint="${service_url}/health"
+                  status_code=$(curl -LI "${health_endpoint}" -o /dev/null -w '%{http_code}\n' -s)
                   echo "Health check status code: ${status_code}"
                   echo "status_code=${status_code}" >> "${GITHUB_OUTPUT}"
 
